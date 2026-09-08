@@ -15,7 +15,7 @@ const skill = (name: string, description: string, over: Partial<SkillLike> = {})
   description,
   filePath: `/skills/${name}/SKILL.md`,
   disableModelInvocation: false,
-  sourceInfo: { type: "project" },
+  sourceInfo: { scope: "project", source: "local" },
   ...over,
 });
 
@@ -38,13 +38,13 @@ test("the overview says the cost is per request, not once", () => {
 
 test("the overview counts the unused bill and names the sources", () => {
   const inv = buildInventory(
-    [skill("used", "x".repeat(100), { sourceInfo: { type: "global" } }), skill("idle", "y".repeat(300))],
+    [skill("used", "x".repeat(100), { sourceInfo: { scope: "user", source: "local" } }), skill("idle", "y".repeat(300))],
     format,
   );
   const text = formatOverview(inv, { used: { count: 4, lastAt: NOW, byModel: 4, byCommand: 0 } }, NOW);
   assert.match(text, /1 of them has never fired/);
   assert.match(text, /By source:/);
-  assert.match(text, /global/);
+  assert.match(text, /user/);
   assert.match(text, /Most used:/);
   assert.match(text, /used\s+4×\s+last today/);
 });

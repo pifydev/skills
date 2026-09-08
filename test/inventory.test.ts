@@ -7,7 +7,7 @@ const skill = (name: string, description: string, over: Partial<SkillLike> = {})
   description,
   filePath: `/skills/${name}/SKILL.md`,
   disableModelInvocation: false,
-  sourceInfo: { type: "project" },
+  sourceInfo: { scope: "project", source: "local" },
   ...over,
 });
 
@@ -61,14 +61,14 @@ test("a hidden skill is in the inventory and costs nothing", () => {
 test("grouping by source is how you would go and remove them", () => {
   const inv = buildInventory(
     [
-      skill("a", "aaaa", { sourceInfo: { type: "global" } }),
-      skill("b", "bb", { sourceInfo: { type: "project" } }),
-      skill("c", "cccccc", { sourceInfo: { type: "global" } }),
+      skill("a", "aaaa", { sourceInfo: { scope: "user", source: "local" } }),
+      skill("b", "bb", { sourceInfo: { scope: "project", source: "local" } }),
+      skill("c", "cccccc", { sourceInfo: { scope: "user", source: "local" } }),
     ],
     format,
   );
   const groups = bySource(inv);
-  assert.equal(groups[0]!.source, "global", "costliest source first");
+  assert.equal(groups[0]!.source, "user", "costliest source first");
   assert.equal(groups[0]!.count, 2);
   assert.equal(groups.find((g) => g.source === "project")!.count, 1);
 });
@@ -83,4 +83,18 @@ test("token estimates use the suite's four-chars rule", () => {
   assert.equal(estimateTokens(""), 0);
   assert.equal(estimateTokens("abcd"), 1);
   assert.equal(estimateTokens("abcde"), 2);
+});
+
+test("an installed package names itself; your own skills are named by scope", () => {
+  // Grouping exists so you know where to go and remove them, and "the
+  // superpowers package" is a place you can go while "local" is not.
+  const inv = buildInventory(
+    [
+      skill("a", "x", { sourceInfo: { scope: "user", source: "superpowers" } }),
+      skill("b", "y", { sourceInfo: { scope: "project", source: "local" } }),
+    ],
+    format,
+  );
+  assert.equal(inv.costs.find((c) => c.name === "a")!.source, "superpowers");
+  assert.equal(inv.costs.find((c) => c.name === "b")!.source, "project");
 });

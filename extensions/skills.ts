@@ -31,6 +31,7 @@ import { basename, dirname, join } from "node:path";
 import { buildInventory, type Inventory, type SkillLike } from "../src/inventory.ts";
 import { parseLedger, record, skillForCommand, skillForRead, type Ledger } from "../src/ledger.ts";
 import { checkSkill } from "../src/spec.ts";
+import { danglingReferences, extractReferences, shadowedSkills, type DiagnosticLike } from "../src/graph.ts";
 import {
   formatCheck,
   formatCost,
@@ -47,6 +48,8 @@ export default function skillsExtension(pi: ExtensionAPI) {
   let inventory: Inventory | null = null;
   let ledger: Ledger = {};
   let ledgerFile: string | null = null;
+  /** pi reports name collisions and then carries on with the winner. */
+  let diagnostics: DiagnosticLike[] = [];
 
   /**
    * One ledger per project, keyed the way the rest of the suite keys
@@ -86,12 +89,14 @@ export default function skillsExtension(pi: ExtensionAPI) {
         includeDefaults: true,
       });
       skills = loaded.skills;
+      diagnostics = (loaded.diagnostics ?? []) as DiagnosticLike[];
       inventory = buildInventory(
         skills as unknown as SkillLike[],
         (subset) => formatSkillsForPrompt(subset as unknown as Skill[]),
       );
     } catch {
       skills = [];
+      diagnostics = [];
       inventory = null;
     }
   }
@@ -164,6 +169,7 @@ export default function skillsExtension(pi: ExtensionAPI) {
           ctx.ui.notify(formatUnused(inventory, ledger), "info");
           return;
         case "check": {
+          const bodies = new Map<string, string>();
           const checked: CheckedSkill[] = skills.map((skill) => {
             let text = "";
             try {
@@ -175,13 +181,22 @@ export default function skillsExtension(pi: ExtensionAPI) {
                 problems: [{ level: "error" as const, message: "could not be read" }],
               };
             }
+            bodies.set(skill.name, text);
             return {
               name: skill.name,
               filePath: skill.filePath,
               problems: checkSkill(text, basename(dirname(skill.filePath))),
             };
           });
-          ctx.ui.notify(formatCheck(checked), "info");
+
+          // Resolve against what pi LOADED, not what is on disk: a skill that
+          // lost a name collision is missing as far as the model is concerned.
+          const loadedNames = new Set(skills.map((s) => s.name));
+          const dangling = danglingReferences(
+            [...bodies].map(([name, text]) => ({ name, references: extractReferences(name, text) })),
+            loadedNames,
+          );
+          ctx.ui.notify(formatCheck(checked, dangling, shadowedSkills(diagnostics)), "info");
           return;
         }
       }

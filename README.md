@@ -51,9 +51,17 @@ It refuses to call them useless, and that matters — a skill for a rare job ear
 
 ### `/skills check`
 
-Validates every loaded skill against the [Agent Skills specification](https://agentskills.io/specification): the closed frontmatter field set, a name matching its directory, and the length limits. Errors break the spec; a long body is reported as the spec's own guidance rather than a failure.
+Three questions, because a skill can be well-formed and still broken.
 
-pi is forgiving about all of this — it will happily load a skill whose name disagrees with its directory. Those load fine here and break somewhere else: another host, a validator, a share.
+**Does the file conform?** Validated against the [Agent Skills specification](https://agentskills.io/specification): the closed frontmatter field set, a name matching its directory, and the length limits. Errors break the spec; a long body is reported as the spec's own guidance rather than a failure. pi is forgiving about all of this — it will happily load a skill whose name disagrees with its directory. Those load fine here and break somewhere else: another host, a validator, a share.
+
+**Does it point at skills you have?** Collections are written whole and handed out one at a time. Measured on a published collection: 6 of its 15 skills name a sibling, one of them naming six. Install that skill alone — which is exactly what `--skill NAME` and a directory copy do — and every one of those references points at something that is not there, while the model is told to use it anyway.
+
+Authors already know. One collection hedges with *"skip this section entirely if the `triage` skill isn't installed"*; another with *"use elements-of-style:writing-clearly-and-concisely skill if available"*. Those are the workarounds you write when nothing checks for you.
+
+The check is deliberately conservative, because a check that cries wolf is one people learn to skip. It reads the two forms collections actually write — `namespace:skill-name` and `` `skill-name` skill`` — ignores bare paths like `skills/foo` that are as often documentation links, and skips fenced code blocks: a fence opened with ```` ```json:metadata ```` looks exactly like a reference, and did read as one until a real collection proved it.
+
+**Is anything shadowed?** Two skills with the same name means pi loads one and drops the other. It reports the collision and carries on, so the loser vanishes with nothing said — and the winner is the **global** one, so a project's own skill is the one that disappears. `/skills check` shows both paths.
 
 ## The ledger
 

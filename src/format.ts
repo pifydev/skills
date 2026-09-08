@@ -9,6 +9,7 @@ import { bySource } from "./inventory.ts";
 import type { Ledger, UsageRow } from "./ledger.ts";
 import { neverFired, usageRows } from "./ledger.ts";
 import type { Problem } from "./spec.ts";
+import type { Dangling, Shadowed } from "./graph.ts";
 
 export function formatTokens(tokens: number): string {
   if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(1)}M`;
@@ -115,23 +116,59 @@ export interface CheckedSkill {
   problems: Problem[];
 }
 
-export function formatCheck(checked: readonly CheckedSkill[]): string {
+export function formatCheck(
+  checked: readonly CheckedSkill[],
+  dangling: readonly Dangling[] = [],
+  shadowed: readonly Shadowed[] = [],
+): string {
   if (checked.length === 0) return "No skills loaded, so there is nothing to check.";
   const bad = checked.filter((c) => c.problems.length > 0);
-  if (bad.length === 0) {
-    return `${checked.length} skill${checked.length === 1 ? "" : "s"} conform to the Agent Skills specification.`;
-  }
   const lines: string[] = [];
+
   for (const skill of bad) {
     lines.push(`${skill.name} — ${skill.filePath}`);
     for (const problem of skill.problems) {
       lines.push(`  ${problem.level === "error" ? "error  " : "warning"} ${problem.message}`);
     }
   }
+
+  // A skill telling the model to use something that is not installed is not a
+  // malformed file — every one of these passes the spec — so it gets its own
+  // section rather than being buried among frontmatter complaints.
+  if (dangling.length > 0) {
+    if (lines.length > 0) lines.push("");
+    lines.push("References to skills that are not installed:");
+    for (const entry of dangling) {
+      lines.push(`  ${entry.from} → ${entry.missing.join(", ")}`);
+    }
+    lines.push(
+      "  Collections are written whole and handed out one skill at a time. The instruction",
+      "  survives the trip; its target does not, and the model is told to use it anyway.",
+    );
+  }
+
+  if (shadowed.length > 0) {
+    if (lines.length > 0) lines.push("");
+    lines.push("Shadowed by a name collision — pi kept one and dropped the other:");
+    for (const entry of shadowed) {
+      lines.push(`  ${entry.name}`, `    kept    ${entry.winner}`, `    dropped ${entry.loser}`);
+    }
+  }
+
+  if (lines.length === 0) {
+    return (
+      `${checked.length} skill${checked.length === 1 ? "" : "s"} conform to the Agent Skills specification, ` +
+      "with every reference resolving."
+    );
+  }
+
   const errors = bad.filter((c) => c.problems.some((p) => p.level === "error")).length;
   lines.push(
     "",
-    `${checked.length} checked · ${errors} with errors · ${bad.length - errors} with warnings only.`,
+    `${checked.length} checked · ${errors} with errors · ${bad.length - errors} with warnings only` +
+      (dangling.length > 0 ? ` · ${dangling.length} with unresolved references` : "") +
+      (shadowed.length > 0 ? ` · ${shadowed.length} shadowed` : "") +
+      ".",
   );
   return lines.join("\n");
 }

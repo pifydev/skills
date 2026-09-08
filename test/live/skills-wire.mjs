@@ -21,6 +21,7 @@ import { formatSkillsForPrompt, loadSkills } from "@earendil-works/pi-coding-age
 import { buildInventory } from "../../src/inventory.ts";
 import { checkSkill } from "../../src/spec.ts";
 import { skillForRead } from "../../src/ledger.ts";
+import { danglingReferences, extractReferences, shadowedSkills } from "../../src/graph.ts";
 
 const NL = String.fromCharCode(10);
 let passed = 0;
@@ -115,6 +116,70 @@ try {
     "code-review",
   );
   check("the spec checker passes a well-formed real skill", problems.length === 0, JSON.stringify(problems));
+  // ── Name collisions: pi reports them and carries on with the winner ──
+  const collide = join(root, "collide");
+  const cCwd = join(collide, "p");
+  const cAgent = join(collide, "a");
+  writeSkill(join(cCwd, ".pi", "skills"), "review", "name: review" + NL + "description: the project one");
+  writeSkill(join(cAgent, "skills"), "review", "name: review" + NL + "description: the global one");
+  const collided = loadSkills({ cwd: cCwd, agentDir: cAgent, skillPaths: [], includeDefaults: true });
+  const shadowed = shadowedSkills(collided.diagnostics ?? []);
+  check("a duplicate name loads only once", collided.skills.length === 1, `${collided.skills.length}`);
+  check("and pi says which one it dropped", shadowed.length === 1, JSON.stringify(shadowed[0] ?? null));
+  if (shadowed[0]) {
+    console.log(`  kept ${shadowed[0].winner}`);
+    console.log(`  drop ${shadowed[0].loser}`);
+  }
+
+  // ── The extractor against the collection it was built from ───────────
+  const collection = process.env.SKILLS_COLLECTION;
+  if (collection) {
+    const { readdirSync, readFileSync, existsSync: exists } = await import("node:fs");
+    const dirs = readdirSync(collection).filter((d) => exists(join(collection, d, "SKILL.md")));
+    const parsed = dirs.map((d) => {
+      const text = readFileSync(join(collection, d, "SKILL.md"), "utf8");
+      const m = /^name:\s*(.+)$/m.exec(text);
+      return { name: (m ? m[1] : d).trim(), text };
+    });
+    const names = new Set(parsed.map((p) => p.name));
+    const withRefs = parsed.map((p) => ({ name: p.name, references: extractReferences(p.name, p.text) }));
+    const referencing = withRefs.filter((p) => p.references.length > 0);
+    console.log(`${NL}collection at ${collection}: ${parsed.length} skills, ${referencing.length} reference a sibling`);
+    for (const r of referencing) console.log(`  ${r.name} -> ${r.references.join(", ")}`);
+
+    check("the extractor finds the references a real collection writes", referencing.length > 0);
+
+    // A complete collection is not necessarily self-contained: this one names
+    // a skill belonging to a different plugin, and hedges it with "if
+    // available" — the workaround an author writes when nothing checks.
+    const whole = danglingReferences(withRefs, names);
+    const siblings = withRefs.map((r) => ({
+      name: r.name,
+      references: r.references.filter((t) => names.has(t)),
+    }));
+    check(
+      "installed whole, no reference to a sibling dangles",
+      danglingReferences(siblings, names).length === 0,
+      JSON.stringify(danglingReferences(siblings, names)),
+    );
+    check(
+      "a reference to a skill outside the collection is still reported",
+      whole.length > 0,
+      whole.map((d) => `${d.from} -> ${d.missing.join(",")}`).join(" · "),
+    );
+    // The failure the ecosystem actually produces: one skill, taken alone.
+    const alone = referencing[0];
+    if (alone) {
+      const solo = danglingReferences([alone], new Set([alone.name]));
+      check(
+        "installed alone, every sibling reference dangles",
+        solo.length === 1 && solo[0].missing.length === alone.references.length,
+        `${alone.name} would name ${alone.references.length} missing skills`,
+      );
+    }
+  } else {
+    console.log(`${NL}(set SKILLS_COLLECTION=<dir of skill folders> to check a real collection)`);
+  }
 } finally {
   rmSync(root, { recursive: true, force: true });
 }

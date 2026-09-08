@@ -20,7 +20,14 @@ export interface SkillLike {
   description: string;
   filePath: string;
   disableModelInvocation: boolean;
-  sourceInfo?: { type?: string; path?: string } | undefined;
+  /**
+   * pi's own shape. There is no `type` field — the first version of this
+   * package read one and grouped every skill under "unknown". The unit tests
+   * missed it because their fixtures invented the shape instead of checking
+   * it against pi. `scope` says user or project; `source` names the package a
+   * skill arrived in, or "local" for one you put there yourself.
+   */
+  sourceInfo?: { scope?: string; source?: string; path?: string; baseDir?: string } | undefined;
 }
 
 /** Rough token count, the same 4-chars-per-token rule the suite uses elsewhere. */
@@ -101,8 +108,13 @@ function framing(format: FormatSkills, visible: readonly SkillLike[]): number {
 }
 
 function sourceOf(skill: SkillLike): string {
-  const type = skill.sourceInfo?.type;
-  return typeof type === "string" && type ? type : "unknown";
+  const info = skill.sourceInfo;
+  // A skill from an installed package is best named by that package; one you
+  // wrote yourself is best named by where it lives.
+  const source = typeof info?.source === "string" ? info.source : "";
+  if (source && source !== "local") return source;
+  const scope = typeof info?.scope === "string" ? info.scope : "";
+  return scope || "unknown";
 }
 
 /** Group by where the skills came from, because that is how you remove them. */
