@@ -31,7 +31,13 @@ import { basename, dirname, join } from "node:path";
 import { buildInventory, type Inventory, type SkillLike } from "../src/inventory.ts";
 import { parseLedger, record, skillForCommand, skillForRead, type Ledger } from "../src/ledger.ts";
 import { checkSkill } from "../src/spec.ts";
-import { danglingReferences, extractReferences, shadowedSkills, type DiagnosticLike } from "../src/graph.ts";
+import {
+  danglingReferences,
+  declaredRequires,
+  extractReferences,
+  shadowedSkills,
+  type DiagnosticLike,
+} from "../src/graph.ts";
 import {
   formatCheck,
   formatCost,
@@ -50,6 +56,14 @@ export default function skillsExtension(pi: ExtensionAPI) {
   let ledgerFile: string | null = null;
   /** pi reports name collisions and then carries on with the winner. */
   let diagnostics: DiagnosticLike[] = [];
+
+  /** The YAML block between the leading and closing `---` fences, if any. */
+  function frontmatterOf(text: string): string {
+    const lines = text.split(/\r?\n/);
+    if (lines[0]?.trim() !== "---") return "";
+    const end = lines.indexOf("---", 1);
+    return end === -1 ? "" : lines.slice(1, end).join("\n");
+  }
 
   /**
    * One ledger per project, keyed the way the rest of the suite keys
@@ -193,7 +207,14 @@ export default function skillsExtension(pi: ExtensionAPI) {
           // lost a name collision is missing as far as the model is concerned.
           const loadedNames = new Set(skills.map((s) => s.name));
           const dangling = danglingReferences(
-            [...bodies].map(([name, text]) => ({ name, references: extractReferences(name, text) })),
+            [...bodies].map(([name, text]) => {
+              const frontmatter = frontmatterOf(text);
+              return {
+                name,
+                references: extractReferences(name, text),
+                requires: declaredRequires(frontmatter),
+              };
+            }),
             loadedNames,
           );
           ctx.ui.notify(formatCheck(checked, dangling, shadowedSkills(diagnostics)), "info");

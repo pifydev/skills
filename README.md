@@ -61,6 +61,23 @@ Authors already know. One collection hedges with *"skip this section entirely if
 
 The check is deliberately conservative, because a check that cries wolf is one people learn to skip. It reads the two forms collections actually write — `namespace:skill-name` and `` `skill-name` skill`` — ignores bare paths like `skills/foo` that are as often documentation links, and skips fenced code blocks: a fence opened with ```` ```json:metadata ```` looks exactly like a reference, and did read as one until a real collection proved it.
 
+**Declaring what you need.** Scraping prose is guesswork: it cannot tell a hard requirement from a passing mention, which is why the extractor is tuned to be quiet rather than complete. If you author skills, say it outright instead. The Agent Skills field set is closed, but `metadata` is its sanctioned open field, so this costs no deviation from the spec:
+
+```yaml
+---
+name: subagent-driven-development
+description: Use when executing an implementation plan with independent tasks.
+metadata:
+  requires:
+    - test-driven-development
+    - writing-plans
+---
+```
+
+A declared requirement that is missing is a **fact**, not a heuristic, so `/skills check` reports it separately and says plainly that the skill will not work as written. A prose mention that is missing stays the softer signal it is. Declaring a dependency also removes it from the guesswork pile — the same need is never reported twice under two confidences.
+
+The idea is [spec-kit](https://github.com/github/spec-kit)'s: its extension manifests state `requires` and `provides` rather than leaving a reader to infer them.
+
 **Is anything shadowed?** Two skills with the same name means pi loads one and drops the other. It reports the collision and carries on, so the loser vanishes with nothing said — and the winner is the **global** one, so a project's own skill is the one that disappears. `/skills check` shows both paths.
 
 ## The ledger

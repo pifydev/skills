@@ -1,6 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { danglingReferences, extractReferences, shadowedSkills } from "../src/graph.ts";
+import {
+  danglingReferences,
+  declaredRequires,
+  extractReferences,
+  shadowedSkills,
+} from "../src/graph.ts";
 
 test("the qualified form is recognised, as published collections write it", () => {
   const body = "First use superpowers:test-driven-development, then superpowers:writing-plans.";
@@ -64,6 +69,7 @@ test("dangling references are the ones whose target is not loaded", () => {
   );
   // Worst first: the skill missing the most is the one most likely to misfire.
   assert.equal(dangling[0]!.from, "lonely");
+  assert.equal(dangling[0]!.declared, false, "prose mentions are not declarations");
   assert.deepEqual(dangling[0]!.missing, ["a", "b", "c"]);
   assert.equal(dangling.length, 2);
   assert.ok(!dangling.some((d) => d.from === "writing-plans"), "a resolving reference is not reported");
@@ -72,7 +78,7 @@ test("dangling references are the ones whose target is not loaded", () => {
 test("a shadowed skill counts as missing, because the model cannot see it", () => {
   // Resolution is against what pi LOADED, not what is on disk.
   const dangling = danglingReferences([{ name: "a", references: ["review"] }], new Set(["a"]));
-  assert.deepEqual(dangling, [{ from: "a", missing: ["review"] }]);
+  assert.deepEqual(dangling, [{ from: "a", missing: ["review"], declared: false }]);
 });
 
 test("pi's collision diagnostics become a readable answer", () => {
@@ -124,4 +130,62 @@ test("a reference into another plugin is still a reference", () => {
   // author writes when nothing checks for them.
   const body = "- Use elements-of-style:writing-clearly-and-concisely skill if available";
   assert.deepEqual(extractReferences("brainstorming", body), ["writing-clearly-and-concisely"]);
+});
+
+test("a declared requirement is a stronger fact than a prose mention", () => {
+  // spec-kit's manifests state `requires` instead of leaving a reader to
+  // infer it. The Agent Skills field set is closed, but `metadata` is its
+  // sanctioned open field, so a declaration costs no deviation from the spec.
+  const dangling = danglingReferences(
+    [
+      { name: "child", references: ["mentioned-only"], requires: ["hard-need"] },
+      { name: "loose", references: ["also-missing"] },
+    ],
+    new Set(["child", "loose"]),
+  );
+  // Declared first: it is the one the author asserted.
+  assert.equal(dangling[0]!.declared, true);
+  assert.deepEqual(dangling[0]!.missing, ["hard-need"]);
+  assert.ok(dangling.some((d) => !d.declared && d.missing.includes("mentioned-only")));
+  assert.ok(dangling.some((d) => d.from === "loose" && !d.declared));
+});
+
+test("a requirement that is also mentioned in prose is reported once", () => {
+  // Otherwise the same fact appears twice under two different confidences.
+  const dangling = danglingReferences(
+    [{ name: "child", references: ["hard-need"], requires: ["hard-need"] }],
+    new Set(["child"]),
+  );
+  assert.equal(dangling.length, 1);
+  assert.equal(dangling[0]!.declared, true);
+});
+
+test("metadata.requires is read in the shapes people write it", () => {
+  const NL = String.fromCharCode(10);
+  const yaml = (...rows: string[]) => ["name: x", ...rows].join(NL);
+
+  // Block sequence — the shape a manifest is usually written in.
+  assert.deepEqual(
+    declaredRequires(yaml("metadata:", "  requires:", "    - test-driven-development", "    - writing-plans")),
+    ["test-driven-development", "writing-plans"],
+  );
+
+  // Flow sequence, with and without quotes.
+  assert.deepEqual(declaredRequires(yaml("metadata:", '  requires: ["alpha", beta]')), ["alpha", "beta"]);
+
+  // A sibling key after the list must not be swallowed into it.
+  assert.deepEqual(
+    declaredRequires(yaml("metadata:", "  requires:", "    - alpha", "  category: engineering")),
+    ["alpha"],
+  );
+});
+
+test("no metadata, or metadata without requires, declares nothing", () => {
+  const NL = String.fromCharCode(10);
+  const yaml = (...rows: string[]) => rows.join(NL);
+  assert.deepEqual(declaredRequires(yaml("name: x", "description: d")), []);
+  assert.deepEqual(declaredRequires(yaml("name: x", "metadata:", "  category: engineering")), []);
+  // A non-indented key ends the mapping, so a later top-level `requires` is
+  // not metadata's.
+  assert.deepEqual(declaredRequires(yaml("metadata:", "  a: b", "requires:", "  - nope")), []);
 });

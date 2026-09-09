@@ -93,6 +93,8 @@ export function extractReferences(name: string, body: string): string[] {
 export interface Dangling {
   from: string;
   missing: string[];
+  /** True when the author named these in metadata.requires rather than prose. */
+  declared: boolean;
 }
 
 /**
@@ -101,16 +103,27 @@ export interface Dangling {
  * shadowed by a name collision is missing as far as the model is concerned.
  */
 export function danglingReferences(
-  skills: ReadonlyArray<{ name: string; references: readonly string[] }>,
+  skills: ReadonlyArray<{ name: string; references: readonly string[]; requires?: readonly string[] }>,
   loadedNames: ReadonlySet<string>,
 ): Dangling[] {
-  return skills
-    .map((skill) => ({
-      from: skill.name,
-      missing: skill.references.filter((target) => !loadedNames.has(target)),
-    }))
-    .filter((entry) => entry.missing.length > 0)
-    .sort((a, b) => b.missing.length - a.missing.length || a.from.localeCompare(b.from));
+  const out: Dangling[] = [];
+  for (const skill of skills) {
+    const requires = skill.requires ?? [];
+    const missingDeclared = requires.filter((target) => !loadedNames.has(target));
+    // A declared requirement is not also reported as a prose mention, or the
+    // same fact would appear twice under two different confidences.
+    const missingMentioned = skill.references.filter(
+      (target) => !loadedNames.has(target) && !requires.includes(target),
+    );
+    if (missingDeclared.length > 0) out.push({ from: skill.name, missing: missingDeclared, declared: true });
+    if (missingMentioned.length > 0) out.push({ from: skill.name, missing: missingMentioned, declared: false });
+  }
+  return out.sort(
+    (a, b) =>
+      Number(b.declared) - Number(a.declared) ||
+      b.missing.length - a.missing.length ||
+      a.from.localeCompare(b.from),
+  );
 }
 
 /**
@@ -139,4 +152,65 @@ export function shadowedSkills(diagnostics: readonly DiagnosticLike[]): Shadowed
     out.push({ name: collision.name, winner: collision.winnerPath, loser: collision.loserPath });
   }
   return out;
+}
+
+/**
+ * Dependencies a skill *declares*, rather than ones inferred from its prose.
+ *
+ * Scraping references out of sentences works and is guesswork: it cannot tell
+ * a hard requirement from a passing mention, and it is tuned to be quiet
+ * rather than complete. A manifest solves that by asking the author. The
+ * Agent Skills specification has a closed field set, but `metadata` is its
+ * sanctioned open one, so a declaration costs no deviation from the spec:
+ *
+ *   metadata:
+ *     requires:
+ *       - test-driven-development
+ *       - writing-plans
+ *
+ * The idea is spec-kit's, whose extension manifests state `requires` and
+ * `provides` instead of leaving a reader to infer them. What a declaration
+ * buys here is precision: a declared dependency that is missing is a fact,
+ * not a heuristic, and can be reported as an error without the risk of crying
+ * wolf that keeps the prose extractor conservative.
+ */
+export function declaredRequires(frontmatter: string): string[] {
+  const lines = frontmatter.split(/\r?\n/);
+  const start = lines.findIndex((line) => /^metadata\s*:/.test(line));
+  if (start === -1) return [];
+
+  const found: string[] = [];
+  const inline = /^metadata\s*:\s*\{?[^}]*\brequires\s*:\s*\[([^\]]*)\]/.exec(lines[start]!);
+  if (inline) return names(inline[1]!.split(","));
+
+  for (let i = start + 1; i < lines.length; i++) {
+    const line = lines[i]!;
+    // A non-indented line ends the mapping.
+    if (line.trim() !== "" && !/^\s/.test(line)) break;
+
+    const flow = /^\s+requires\s*:\s*\[([^\]]*)\]/.exec(line);
+    if (flow) return names(flow[1]!.split(","));
+
+    if (/^\s+requires\s*:\s*$/.test(line)) {
+      // A block sequence: the `- item` lines that follow, until the
+      // indentation returns to a sibling key.
+      for (let j = i + 1; j < lines.length; j++) {
+        const item = /^\s+-\s*(.+)$/.exec(lines[j]!);
+        if (!item) break;
+        found.push(item[1]!);
+      }
+      return names(found);
+    }
+  }
+  return [];
+}
+
+function names(raw: readonly string[]): string[] {
+  const out = new Set<string>();
+  for (const value of raw) {
+    const name = value.trim().replace(/^["']|["']$/g, "").trim();
+    // Same shape the rest of this module treats as a skill name.
+    if (/^[a-z][a-z0-9-]*$/.test(name)) out.add(name);
+  }
+  return [...out].sort();
 }

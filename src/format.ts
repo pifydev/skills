@@ -135,10 +135,26 @@ export function formatCheck(
   // A skill telling the model to use something that is not installed is not a
   // malformed file — every one of these passes the spec — so it gets its own
   // section rather than being buried among frontmatter complaints.
-  if (dangling.length > 0) {
+  //
+  // Declared and merely-mentioned are separated because they are different
+  // facts. An author who wrote `metadata.requires` stated the need; prose is
+  // read by a heuristic that is deliberately quiet and can be wrong.
+  const declared = dangling.filter((d) => d.declared);
+  const mentioned = dangling.filter((d) => !d.declared);
+
+  if (declared.length > 0) {
     if (lines.length > 0) lines.push("");
-    lines.push("References to skills that are not installed:");
-    for (const entry of dangling) {
+    lines.push("Declared requirements that are not installed:");
+    for (const entry of declared) {
+      lines.push(`  ${entry.from} → ${entry.missing.join(", ")}`);
+    }
+    lines.push("  These are named in metadata.requires, so the skill will not work as written.");
+  }
+
+  if (mentioned.length > 0) {
+    if (lines.length > 0) lines.push("");
+    lines.push("Skills referred to in prose that are not installed:");
+    for (const entry of mentioned) {
       lines.push(`  ${entry.from} → ${entry.missing.join(", ")}`);
     }
     lines.push(
@@ -166,7 +182,8 @@ export function formatCheck(
   lines.push(
     "",
     `${checked.length} checked · ${errors} with errors · ${bad.length - errors} with warnings only` +
-      (dangling.length > 0 ? ` · ${dangling.length} with unresolved references` : "") +
+      (declared.length > 0 ? ` · ${declared.length} missing a declared requirement` : "") +
+      (mentioned.length > 0 ? ` · ${mentioned.length} with unresolved references` : "") +
       (shadowed.length > 0 ? ` · ${shadowed.length} shadowed` : "") +
       ".",
   );
