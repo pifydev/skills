@@ -93,7 +93,7 @@ function run(arm, description) {
       text: out.trim().slice(0, 160),
     };
   } finally {
-    rmSync(repo, { recursive: true, force: true });
+    rmSync(repo, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
   }
 }
 

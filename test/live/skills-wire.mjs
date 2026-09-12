@@ -181,7 +181,7 @@ try {
     console.log(`${NL}(set SKILLS_COLLECTION=<dir of skill folders> to check a real collection)`);
   }
 } finally {
-  rmSync(root, { recursive: true, force: true });
+  rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
 }
 
 console.log(`${NL}${passed}/${passed + failed} passed`);
