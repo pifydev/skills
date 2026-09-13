@@ -1,6 +1,6 @@
 # @pify/skills
 
-[![npm version](https://img.shields.io/npm/v/@pify/skills)](https://www.npmjs.com/package/@pify/skills) [![npm downloads](https://img.shields.io/npm/dm/@pify/skills)](https://www.npmjs.com/package/@pify/skills)
+[![CI](https://github.com/pifydev/skills/actions/workflows/ci.yml/badge.svg)](https://github.com/pifydev/skills/actions/workflows/ci.yml) [![npm version](https://img.shields.io/npm/v/@pify/skills)](https://www.npmjs.com/package/@pify/skills) [![npm downloads](https://img.shields.io/npm/dm/@pify/skills)](https://www.npmjs.com/package/@pify/skills)
 
 The skills [pi](https://github.com/earendil-works/pi) has loaded, what they cost in every request, and which ones ever fire.
 
