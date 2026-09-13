@@ -1,5 +1,7 @@
 # @pify/skills
 
+[![npm version](https://img.shields.io/npm/v/@pify/skills)](https://www.npmjs.com/package/@pify/skills) [![npm downloads](https://img.shields.io/npm/dm/@pify/skills)](https://www.npmjs.com/package/@pify/skills)
+
 The skills [pi](https://github.com/earendil-works/pi) has loaded, what they cost in every request, and which ones ever fire.
 
 Part of the [Pify suite](https://github.com/pifydev). Install with [`pify install skills`](https://github.com/pifydev/cli) or `pi install npm:@pify/skills`.
