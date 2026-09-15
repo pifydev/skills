@@ -25,11 +25,18 @@ import {
 } from "@earendil-works/pi-coding-agent";
 
 import { createHash } from "node:crypto";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 
 import { buildInventory, type Inventory, type SkillLike } from "../src/inventory.ts";
-import { parseLedger, record, skillForCommand, skillForRead, type Ledger } from "../src/ledger.ts";
+import {
+  commitLedger,
+  parseLedger,
+  record,
+  skillForCommand,
+  skillForRead,
+  type Ledger,
+} from "../src/ledger.ts";
 import { checkSkill } from "../src/spec.ts";
 import {
   danglingReferences,
@@ -53,6 +60,8 @@ export default function skillsExtension(pi: ExtensionAPI) {
   let skills: Skill[] = [];
   let inventory: Inventory | null = null;
   let ledger: Ledger = {};
+  /** Firings recorded this session but not yet folded into the file on disk. */
+  let pending: Ledger = {};
   let ledgerFile: string | null = null;
   /** pi reports name collisions and then carries on with the winner. */
   let diagnostics: DiagnosticLike[] = [];
@@ -86,11 +95,17 @@ export default function skillsExtension(pi: ExtensionAPI) {
 
   function saveLedger(): void {
     if (!ledgerFile) return;
+    if (Object.keys(pending).length === 0) return;
     try {
-      mkdirSync(dirname(ledgerFile), { recursive: true });
-      writeFileSync(ledgerFile, `${JSON.stringify(ledger, null, 2)}\n`);
+      // Re-read and merge whatever another session wrote since we loaded, then
+      // swap the file in atomically. A plain overwrite is last-writer-wins: two
+      // sessions racing here would erase each other's counts, and a crash
+      // mid-write would truncate the file.
+      ledger = commitLedger(ledgerFile, pending);
+      pending = {};
     } catch {
-      // A ledger that cannot be written costs a count, never a turn.
+      // A ledger that cannot be written costs a count, never a turn. Keep the
+      // pending delta so the next save can still flush it.
     }
   }
 
@@ -116,19 +131,23 @@ export default function skillsExtension(pi: ExtensionAPI) {
   }
 
   function note(name: string, by: "model" | "command"): void {
-    ledger = record(ledger, { name, by, at: Date.now() });
+    const firing = { name, by, at: Date.now() };
+    ledger = record(ledger, firing);
+    pending = record(pending, firing);
     saveLedger();
   }
 
   // ── Counting what fires ──────────────────────────────────────────────
 
-  pi.on("tool_call", async (event) => {
+  pi.on("tool_call", async (event, ctx) => {
     // pi's own skills prompt says: read the skill's file when the task
     // matches. That read IS the invocation.
     if ((event as { toolName?: string }).toolName !== "read") return undefined;
     const path = (event as { input?: { path?: unknown } }).input?.path;
     if (typeof path !== "string") return undefined;
-    const name = skillForRead(path, skills);
+    // The model may read a skill by a path relative to cwd; resolve it there so
+    // it still matches the absolute path pi loaded the skill from.
+    const name = skillForRead(path, skills, ctx.cwd);
     if (name) note(name, "model");
     return undefined;
   });

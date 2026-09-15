@@ -11,8 +11,13 @@
  * task matches, so a `read` of that path is a model invocation. And `/skill:name`
  * is the explicit one. Counting those two is counting all of them.
  *
- * Pure: the ledger and what counts. The extension owns the disk and the clock.
+ * Mostly pure — the ledger and what counts — plus one guarded write:
+ * `commitLedger` folds a session's firings into whatever is already on disk and
+ * swaps the file atomically, so two sessions never clobber each other's counts.
+ * The extension still owns the clock and decides *when* to save.
  */
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { dirname, posix, resolve, win32 } from "node:path";
 
 export interface Firing {
   /** Skill name. */
@@ -73,6 +78,62 @@ export function record(ledger: Ledger, firing: Firing): Ledger {
   };
 }
 
+/**
+ * Combine two ledgers without losing either side's counts: sum every tally and
+ * keep the newest time. Folding the on-disk ledger into a session's pending
+ * firings this way is what stops two concurrent sessions — or a save after a
+ * crash — from erasing each other, since the counts add up instead of the last
+ * writer winning. Inputs are left untouched.
+ */
+export function mergeLedgers(a: Ledger, b: Ledger): Ledger {
+  const out: Ledger = {};
+  for (const name of new Set([...Object.keys(a), ...Object.keys(b)])) {
+    const x = a[name];
+    const y = b[name];
+    if (x && y) {
+      out[name] = {
+        count: x.count + y.count,
+        lastAt: Math.max(x.lastAt, y.lastAt),
+        byModel: x.byModel + y.byModel,
+        byCommand: x.byCommand + y.byCommand,
+      };
+    } else {
+      out[name] = { ...(x ?? y)! };
+    }
+  }
+  return out;
+}
+
+/**
+ * Fold a session's uncommitted firings into the shared ledger file and swap it
+ * in atomically.
+ *
+ * Re-reading the file first — rather than writing an in-memory copy whole —
+ * means whatever another session committed since this one loaded is summed in,
+ * not overwritten. The write goes to a temp file and is renamed over the
+ * target, so a crash mid-write leaves the previous ledger intact instead of a
+ * truncated one.
+ *
+ * Returns the merged ledger so the caller can adopt it as its in-memory view
+ * and clear its pending delta. Throws only if the write itself fails; the
+ * caller keeps its pending delta and retries on the next save.
+ */
+export function commitLedger(file: string, pending: Ledger): Ledger {
+  let onDisk: Ledger = {};
+  try {
+    onDisk = parseLedger(readFileSync(file, "utf8"));
+  } catch {
+    // A missing or unreadable ledger is "nothing recorded yet", not a failure.
+    onDisk = {};
+  }
+  const merged = mergeLedgers(onDisk, pending);
+  mkdirSync(dirname(file), { recursive: true });
+  const tmp = `${file}.${process.pid}.tmp`;
+  writeFileSync(tmp, `${JSON.stringify(merged, null, 2)}\n`);
+  renameSync(tmp, file);
+  return merged;
+}
+
 function samePath(a: string, b: string): boolean {
   return a.replaceAll("\\", "/").toLowerCase() === b.replaceAll("\\", "/").toLowerCase();
 }
@@ -88,9 +149,17 @@ function samePath(a: string, b: string): boolean {
 export function skillForRead(
   path: string,
   skills: ReadonlyArray<{ name: string; filePath: string }>,
+  cwd?: string,
 ): string | null {
+  // The model may read a skill by a path relative to the project root; resolve
+  // it against cwd first so it can match the absolute path pi loaded the skill
+  // from. A path already absolute under either OS's rules — POSIX "/…" or
+  // Windows "C:\…" / "\…" — is left untouched, so a Windows-style absolute path
+  // still matches when the tests (or CI) run on POSIX.
+  const abs =
+    win32.isAbsolute(path) || posix.isAbsolute(path) ? path : resolve(cwd ?? "", path);
   for (const skill of skills) {
-    if (samePath(path, skill.filePath)) return skill.name;
+    if (samePath(abs, skill.filePath)) return skill.name;
   }
   return null;
 }

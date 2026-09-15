@@ -1,6 +1,6 @@
 {
   "name": "@pify/skills",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "description": "See the skills pi has loaded, what they cost in every request, and which ones ever fire",
   "keywords": [
     "pi-package",
